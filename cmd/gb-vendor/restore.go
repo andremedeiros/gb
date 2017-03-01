@@ -4,11 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"sync"
 
+	"github.com/andremedeiros/gb/internal/fileutils"
+	"github.com/andremedeiros/gb/internal/vendor"
 	"github.com/constabulary/gb"
 	"github.com/constabulary/gb/cmd"
-	"github.com/constabulary/gb/internal/fileutils"
-	"github.com/constabulary/gb/internal/vendor"
 	"github.com/pkg/errors"
 )
 
@@ -49,13 +50,20 @@ func restore(ctx *gb.Context) error {
 		return errors.Wrap(err, "could not load manifest")
 	}
 
+	var wg sync.WaitGroup
+
 	errChan := make(chan error, 1)
 	sem := make(chan int, jobs)
 
+	wg.Add(len(m.Dependencies))
 	for _, dep := range m.Dependencies {
 		sem <- 1
 		go func(dep vendor.Dependency) {
-			defer func() { <-sem }()
+			defer func() {
+				wg.Done()
+				<-sem
+			}()
+
 			fmt.Printf("Getting %s\n", dep.Importpath)
 			repo, _, err := vendor.DeduceRemoteRepo(dep.Importpath, insecure)
 			if err != nil {
@@ -82,6 +90,9 @@ func restore(ctx *gb.Context) error {
 		}(dep)
 	}
 
+	wg.Wait()
+
 	close(errChan)
+	close(sem)
 	return <-errChan
 }
