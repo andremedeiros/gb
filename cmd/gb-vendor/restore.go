@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
-	"sync"
 
 	"github.com/constabulary/gb"
 	"github.com/constabulary/gb/cmd"
@@ -13,26 +12,36 @@ import (
 	"github.com/pkg/errors"
 )
 
+const DefaultJobs = 8
+
 func addRestoreFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&insecure, "precaire", false, "allow the use of insecure protocols")
+	fs.IntVar(&jobs, "jobs", DefaultJobs, "maximum amount of restoration jobs occurring at the same time")
 }
 
-var cmdRestore = &cmd.Command{
-	Name:      "restore",
-	UsageLine: "restore [-precaire]",
-	Short:     "restore dependencies from the manifest",
-	Long: `Restore vendor dependencies.
+var (
+	jobs int
+
+	cmdRestore = &cmd.Command{
+		Name:      "restore",
+		UsageLine: "restore [-precaire]",
+		Short:     "restore dependencies from the manifest",
+		Long: `Restore vendor dependencies.
 
 Flags:
 	-precaire
 		allow the use of insecure protocols.
 
+	-jobs N
+	  limit the amount of restoration jobs occurring at the same time.
+
 `,
-	Run: func(ctx *gb.Context, args []string) error {
-		return restore(ctx)
-	},
-	AddFlags: addRestoreFlags,
-}
+		Run: func(ctx *gb.Context, args []string) error {
+			return restore(ctx)
+		},
+		AddFlags: addRestoreFlags,
+	}
+)
 
 func restore(ctx *gb.Context) error {
 	m, err := vendor.ReadManifest(manifestFile(ctx))
@@ -41,12 +50,12 @@ func restore(ctx *gb.Context) error {
 	}
 
 	errChan := make(chan error, 1)
-	var wg sync.WaitGroup
+	sem := make(chan int, jobs)
 
-	wg.Add(len(m.Dependencies))
 	for _, dep := range m.Dependencies {
+		sem <- 1
 		go func(dep vendor.Dependency) {
-			defer wg.Done()
+			defer func() { <-sem }()
 			fmt.Printf("Getting %s\n", dep.Importpath)
 			repo, _, err := vendor.DeduceRemoteRepo(dep.Importpath, insecure)
 			if err != nil {
@@ -71,10 +80,8 @@ func restore(ctx *gb.Context) error {
 				return
 			}
 		}(dep)
-
 	}
 
-	wg.Wait()
 	close(errChan)
 	return <-errChan
 }
