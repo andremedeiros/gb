@@ -33,7 +33,7 @@ Flags:
 		allow the use of insecure protocols.
 
 	-jobs N
-	  limit the amount of restoration jobs occurring at the same time.
+		limit the amount of restoration jobs occurring at the same time.
 
 `,
 		Run: func(ctx *gb.Context, args []string) error {
